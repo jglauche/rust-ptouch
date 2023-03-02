@@ -16,7 +16,7 @@ use structopt::StructOpt;
 #[cfg(feature = "strum")]
 use strum::VariantNames;
 
-use rusb::{Context, Device, DeviceDescriptor, DeviceHandle, Direction, TransferType, UsbContext};
+use rusb::{Context, DeviceDescriptor, DeviceHandle, Direction, TransferType, UsbContext};
 
 pub mod device;
 use device::*;
@@ -31,8 +31,8 @@ pub mod render;
 
 /// PTouch device instance
 pub struct PTouch {
-    _device: Device<Context>,
-    handle: DeviceHandle<Context>,
+    // _device: Device<Context>,
+    handle: Option<DeviceHandle<Context>>,
     descriptor: DeviceDescriptor,
     //endpoints: Endpoints,
     timeout: Duration,
@@ -110,6 +110,9 @@ pub enum Error {
 
     #[error("Operation timeout")]
     Timeout,
+
+    #[error("No USB Connection")]
+    NoUsb,
 
     #[error("PTouch Error ({:?} {:?})", 0, 1)]
     PTouch(Error1, Error2),
@@ -277,8 +280,8 @@ impl PTouch {
 
         // Create device object
         let mut s = Self {
-            _device: device,
-            handle,
+            // _device: device,
+            handle: Some(handle),
             descriptor,
             cmd_ep,
             stat_ep,
@@ -302,9 +305,14 @@ impl PTouch {
     pub fn info(&mut self) -> Result<Info, Error> {
         let timeout = Duration::from_millis(200);
 
+        let handle = match &self.handle{
+            Some(x) => x,
+            None => { return Err(Error::NoUsb)  },
+        };
+
         // Fetch base configuration
-        let languages = self.handle.read_languages(timeout)?;
-        let active_config = self.handle.active_configuration()?;
+        let languages = handle.read_languages(timeout)?;
+        let active_config = handle.active_configuration()?;
 
         trace!("Active configuration: {}", active_config);
         trace!("Languages: {:?}", languages);
@@ -316,15 +324,9 @@ impl PTouch {
 
         // Fetch information
         let language = languages[0];
-        let manufacturer =
-            self.handle
-                .read_manufacturer_string(language, &self.descriptor, timeout)?;
-        let product = self
-            .handle
-            .read_product_string(language, &self.descriptor, timeout)?;
-        let serial = self
-            .handle
-            .read_serial_number_string(language, &self.descriptor, timeout)?;
+        let manufacturer = handle.read_manufacturer_string(language, &self.descriptor, timeout)?;
+        let product = handle.read_product_string(language, &self.descriptor, timeout)?;
+        let serial = handle.read_serial_number_string(language, &self.descriptor, timeout)?;
 
         Ok(Info {
             manufacturer,
@@ -351,7 +353,7 @@ impl PTouch {
 
     /// Setup the printer and print using raw raster data.
     /// Print output must be shifted and in the correct bit-order for this function.
-    /// 
+    ///
     /// TODO: this is too low level of an interface, should be replaced with higher-level apis
     pub fn print_raw(&mut self, data: Vec<[u8; 16]>, info: &PrintInfo) -> Result<(), Error> {
         // TODO: should we check info (and size) match status here?
@@ -405,7 +407,7 @@ impl PTouch {
                     debug!("Print error: {:?} {:?}", s.error1, s.error2);
                     return Err(Error::PTouch(s.error1, s.error2));
                 }
-    
+
                 if s.status_type == DeviceStatus::PhaseChange {
                     debug!("Started printing");
                 }
@@ -434,8 +436,15 @@ impl PTouch {
     fn read(&mut self, timeout: Duration) -> Result<[u8; 32], Error> {
         let mut buff = [0u8; 32];
 
+        let handle = match &self.handle{
+            Some(x) => x,
+            None => {
+                return Err(Error::NoUsb)
+            },
+        };
+
         // Execute read
-        let n = self.handle.read_bulk(self.stat_ep, &mut buff, timeout)?;
+        let n = handle.read_bulk(self.stat_ep, &mut buff, timeout)?;
 
         if n != 32 {
             return Err(Error::Timeout)
@@ -450,8 +459,15 @@ impl PTouch {
     fn write(&mut self, data: &[u8], timeout: Duration) -> Result<(), Error> {
         debug!("WRITE: {:02x?}", data);
 
+        let handle = match &self.handle{
+            Some(x) => x,
+            None => {
+                return Err(Error::NoUsb)
+            },
+        };
+
         // Execute write
-        let n = self.handle.write_bulk(self.cmd_ep, &data, timeout)?;
+        let n = handle.write_bulk(self.cmd_ep, &data, timeout)?;
 
         // Check write length for timeouts
         if n != data.len() {
