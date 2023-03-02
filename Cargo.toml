@@ -41,6 +41,7 @@ embedded-graphics-simulator = { version = "0.2.0", optional = true }
 serde = { version = "1.0.123", features = [ "derive" ], optional = true }
 bitvec = "1.0.1"
 toml = { version = "0.5.8", optional = true }
+bluer = { version = "0.15.7", features = ["bluetoothd"] }
 
 [[bin]]
 name = "ptouch-util"
